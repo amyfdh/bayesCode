@@ -740,6 +740,7 @@ def run_optimisation(
     m0_prior=None,
     m0_prior_sigma=None,
     alpha_update_start=0,
+    weight_entropy=0.0,
     verbose_every=10,
 ):
     losses = []
@@ -749,7 +750,10 @@ def run_optimisation(
         UC = U @ C_small
 
         if update_W_flag:
-            W = update_W(Y, UC, sigma2, alpha, W, M0, bound_eps)
+            W = update_W(
+                Y, UC, sigma2, alpha, W, M0, bound_eps,
+                weight_entropy=weight_entropy,
+            )
 
         if update_M0_flag:
             M0 = update_M0(
@@ -773,6 +777,7 @@ def run_optimisation(
         loss, fit_err = compute_loss(
             Y, UC, W, M0, alpha, lam, C_small, sigma2, eps,
             m0_prior=m0_prior, m0_prior_sigma=m0_prior_sigma,
+            weight_entropy=weight_entropy,
         )
         losses.append(loss)
         fit_errs.append(fit_err)

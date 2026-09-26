@@ -198,6 +198,18 @@ def test_compute_loss_includes_active_full_c_priors():
     np.testing.assert_allclose(total - base, expected_prior)
 
 
+def test_reduced_csmall_runner_supports_weight_entropy():
+    W0 = np.array([[0.60, 0.55], [0.40, 0.45]])
+    W_est, *_ = run_optimisation(
+        Y=np.zeros((2, 2)), U=np.zeros((2, 1)), C_small=np.zeros((1, 2)),
+        M0=np.ones(2), K=2, R=1, eps=1e-10, n_iter=1, sigma2=1.0,
+        alpha=1.0, lam=0.0, W=W0, bound_eps=1e-3,
+        update_alpha_flag=False, update_M0_flag=False, update_C_flag=False,
+        weight_entropy=5.0, verbose_every=1000,
+    )
+    assert np.all(W_est.max(axis=0) > W0.max(axis=0))
+
+
 def test_update_alpha_recovers_true_value():
     np.random.seed(3)
     K, alpha_true = 3, 4.0
