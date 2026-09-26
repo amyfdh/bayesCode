@@ -5,6 +5,7 @@ parameterization and alternating updates are being debugged.
 """
 
 import numpy as np
+import pytest
 
 from create_grid import (
     apply_SVD_to_A,
@@ -16,6 +17,7 @@ from create_grid import (
     create_signal,
 )
 from optimiser_alpha_gamma import (
+    _lowest_b_data,
     define_initial_C_small,
     define_initial_W_and_m,
     initialize_M0_from_b0_T2,
@@ -74,6 +76,15 @@ def test_initialize_m0_monoexponential_is_positive_and_reasonable():
     assert np.isfinite(M0_init).all()
     assert (M0_init > 0).all()
     np.testing.assert_allclose(M0_init, M0_true, atol=0.2)
+
+
+def test_b0_selection_uses_zero_tolerance_not_lowest_available_b_value():
+    Y = np.array([[1.0], [2.0], [3.0]])
+    te, signals = _lowest_b_data(Y, [0.04, 0.06, 1.0], [10.0, 20.0, 10.0])
+    np.testing.assert_allclose(te, [10.0])
+    np.testing.assert_allclose(signals, [[1.0]])
+    with pytest.raises(ValueError, match="b=0"):
+        _lowest_b_data(Y, [0.06, 0.2, 1.0], [10.0, 20.0, 10.0])
 
 
 def test_m0_initialization_is_invariant_to_measurement_order():

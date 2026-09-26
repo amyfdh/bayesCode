@@ -45,11 +45,12 @@ def _mean_by_coordinate(coordinate, signals):
     return values, mean_signals
 
 
-def _lowest_b_data(Y, b_values, TE_values, b_tolerance=1e-12):
+def _lowest_b_data(Y, b_values, TE_values, b_tolerance=0.05):
+    """Return measurements acquired at b=0, allowing a small b tolerance."""
     b, te = _measurement_vectors(b_values, TE_values, Y.shape[0])
-    mask = np.isclose(b, b.min(), atol=b_tolerance, rtol=0.0)
+    mask = np.isclose(b, 0.0, atol=b_tolerance, rtol=0.0)
     if not np.any(mask):
-        raise ValueError("no lowest-b measurements found")
+        raise ValueError(f"no b=0 measurements found within tolerance {b_tolerance}")
     return _mean_by_coordinate(te[mask], Y[mask])
 
 
@@ -248,11 +249,11 @@ def update_M0(Y, UC, W, prior_mean=None, prior_sigma=None, sigma2=1.0):
     return M0_new                                                 
 
 
-def initialize_M0_from_b0_T2(Y, b_values, TE_values, T2_vals, b_tolerance=1e-12):
+def initialize_M0_from_b0_T2(Y, b_values, TE_values, T2_vals, b_tolerance=0.05):
     """Estimate voxelwise M0 by NNLS fitting the b=0 multi-TE signal.
 
     For normalized spectra, the sum of fitted nonnegative T2 amplitudes
-    estimates the voxel scale M0. The lowest-b rows are selected by their b
+    estimates the voxel scale M0. Rows near b=0 are selected by their b
     values, not row position.
     """
     TE_b0, b0 = _lowest_b_data(Y, b_values, TE_values, b_tolerance)
@@ -264,8 +265,8 @@ def initialize_M0_from_b0_T2(Y, b_values, TE_values, T2_vals, b_tolerance=1e-12)
     return M0
 
 
-def initialize_M0_monoexponential(Y, b_values, TE_values, b_tolerance=1e-12):
-    """Estimate M0 from a mono-exponential fit to lowest-b multi-TE data."""
+def initialize_M0_monoexponential(Y, b_values, TE_values, b_tolerance=0.05):
+    """Estimate M0 from a mono-exponential fit to near-b=0 multi-TE data."""
     TE_b0, b0 = _lowest_b_data(Y, b_values, TE_values, b_tolerance)
 
     def model(te, m0, t2):
