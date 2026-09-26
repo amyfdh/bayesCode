@@ -58,8 +58,7 @@ def test_w_analytic_gradient_matches_finite_differences():
     logits = rng.normal(size=3)
     y = rng.normal(size=5)
     UC = rng.normal(size=(5, 3))
-    neighbour_weights = rng.dirichlet(np.ones(3), size=2)
-    args = (y, UC, 1.1, 0.7, 1.8, 1e-3, 0.4, neighbour_weights, 0.6)
+    args = (y, UC, 1.1, 0.7, 1.8, 1e-3, 0.4)
     _, analytic = _W_objective_and_gradient(logits, *args)
     numerical = _finite_difference_gradient(
         lambda z: _W_objective_and_gradient(z, *args)[0], logits
@@ -75,16 +74,6 @@ def test_weight_entropy_prior_promotes_dominant_simplex_weights():
     )
     assert np.all(W_est.max(axis=0) > W0.max(axis=0))
     np.testing.assert_allclose(W_est.sum(axis=0), 1.0, atol=1e-12)
-
-
-def test_spatial_weight_prior_reduces_neighbour_difference():
-    W0 = np.array([[0.90, 0.10], [0.10, 0.90]])
-    W_est = update_W(
-        np.zeros((2, 2)), np.zeros((2, 2)), sigma2=1.0, alpha=1.0,
-        W=W0, m=np.ones(2), bound_eps=1e-3, weight_spatial=10.0,
-        voxel_edges=[(0, 1)],
-    )
-    assert np.linalg.norm(W_est[:, 0] - W_est[:, 1]) < np.linalg.norm(W0[:, 0] - W0[:, 1])
 
 
 def test_constrained_c_update_preserves_simplex_and_improves_fit():

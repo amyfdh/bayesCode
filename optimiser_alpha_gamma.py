@@ -67,7 +67,7 @@ def _solve_nnls(A, y):
 
 def compute_loss(Y, UC, W, M0, alpha, lam, C_small, sigma2, w_floor=1e-10,
                  m0_prior=None, m0_prior_sigma=None, weight_entropy=0.0,
-                 weight_spatial=0.0, voxel_edges=None, C=None,
+                 C=None,
                  c_smoothness=0.0, c_sparsity=0.0, c_diversity=0.0,
                  nD=None, nT2=None):
     resid = Y - (UC @ W) * M0
@@ -88,10 +88,6 @@ def compute_loss(Y, UC, W, M0, alpha, lam, C_small, sigma2, w_floor=1e-10,
             raise ValueError("m0_prior and a positive m0_prior_sigma must be supplied together")
         m0_term = np.sum((M0 - m0_prior) ** 2) / (2 * m0_prior_sigma**2)
     entropy_term = weight_entropy * (-np.sum(W * np.log(np.maximum(W, w_floor))))
-    spatial_term = 0.0
-    if voxel_edges is not None:
-        for v, u in voxel_edges:
-            spatial_term += 0.5 * weight_spatial * np.sum((W[:, v] - W[:, u]) ** 2)
     if (c_smoothness or c_sparsity or c_diversity) and C is None:
         raise ValueError("C must be supplied when full-grid C priors are active")
     c_term = 0.0
@@ -99,7 +95,7 @@ def compute_loss(Y, UC, W, M0, alpha, lam, C_small, sigma2, w_floor=1e-10,
         c_term, _ = _c_grid_regularization(
             C, c_smoothness, c_sparsity, c_diversity, nD, nT2,
         )
-    return data_term + reg_term + dir_term + m0_term + entropy_term + spatial_term + c_term, fit_err
+    return data_term + reg_term + dir_term + m0_term + entropy_term + c_term, fit_err
 
 def update_sigma2(Y, UC, W, M0):
     resid = Y - (UC @ W) * M0                          # same  definition as in compute_loss
@@ -150,15 +146,12 @@ def _bounded_simplex_from_logits(logits, bound_eps):
 
 
 def _W_objective_and_gradient(logits, y, UC, m0, sigma2, alpha, bound_eps,
-                              weight_entropy=0.0, neighbour_weights=None,
-                              weight_spatial=0.0):
+                              weight_entropy=0.0):
     """Single-voxel conditional MAP objective and analytic logits gradient.
 
-    ``weight_entropy`` is a sparsity-favouring prior on the simplex. When
-    neighbours are supplied, ``weight_spatial`` supplies the conditional
-    Gaussian-Markov-field penalty linking this voxel to their previous-outer-
-    iteration weights.  A Dirichlet contribution is retained for backwards
-    compatibility and can be disabled by setting ``alpha=1``.
+    ``weight_entropy`` is a sparsity-favouring prior on the simplex. A
+    Dirichlet contribution is retained for backwards compatibility and can
+    be disabled by setting ``alpha=1``.
     """
     w, q = _bounded_simplex_from_logits(logits, bound_eps)
     pred = m0 * (UC @ w)
@@ -170,35 +163,18 @@ def _W_objective_and_gradient(logits, y, UC, m0, sigma2, alpha, bound_eps,
     entropy = -np.sum(w * np.log(w + 1e-12))
     value = data_term + dir_term + weight_entropy * entropy
     grad_w += weight_entropy * (-(np.log(w + 1e-12) + 1.0))
-    if neighbour_weights is not None and len(neighbour_weights):
-        differences = w[np.newaxis, :] - neighbour_weights
-        value += 0.5 * weight_spatial * np.sum(differences**2)
-        grad_w += weight_spatial * differences.sum(axis=0)
     scale = 1.0 - K * bound_eps
     grad_z = scale * q * (grad_w - np.dot(grad_w, q))
     return value, grad_z
 
 
 def update_W(Y, UC, sigma2, alpha, W, m, bound_eps=1e-2,
-             return_diagnostics=False, weight_entropy=0.0,
-             weight_spatial=0.0, voxel_edges=None):
-    """Update simplex weights with optional sparse and spatial MAP priors.
-
-    ``voxel_edges`` is an iterable of ``(v, u)`` voxel-index pairs. Spatial
-    neighbours are held at their previous outer-iteration values during this
-    update, avoiding order-dependent Gauss--Seidel behaviour.
-    """
+             return_diagnostics=False, weight_entropy=0.0):
+    """Update simplex weights with an optional entropy MAP prior."""
     K = W.shape[0]
     n_voxels = W.shape[1]
     W_new = np.zeros_like(W)
     diagnostics = []
-    neighbours = [[] for _ in range(n_voxels)]
-    if voxel_edges is not None:
-        for v, u in voxel_edges:
-            if not (0 <= v < n_voxels and 0 <= u < n_voxels and v != u):
-                raise ValueError("voxel_edges must contain distinct valid voxel indices")
-            neighbours[v].append(u)
-            neighbours[u].append(v)
 
     for v in range(n_voxels):
         yv = Y[:, v]
@@ -208,12 +184,10 @@ def update_W(Y, UC, sigma2, alpha, W, m, bound_eps=1e-2,
         q0 = np.maximum((w0 - bound_eps) / (1.0 - K * bound_eps), 1e-12)
         q0 = q0 / q0.sum()
         z0 = np.log(q0)
-        neighbour_weights = W[:, neighbours[v]].T if neighbours[v] else None
 
         res = minimize(
             _W_objective_and_gradient, z0, jac=True, method="L-BFGS-B",
-            args=(yv, UC, m[v], sigma2, alpha, bound_eps, weight_entropy,
-                  neighbour_weights, weight_spatial),
+            args=(yv, UC, m[v], sigma2, alpha, bound_eps, weight_entropy),
         )
         w_new, _ = _bounded_simplex_from_logits(res.x, bound_eps)
         W_new[:, v] = w_new
@@ -451,7 +425,7 @@ def run_constrained_optimisation(
     update_lambda_flag=False, m0_prior=None, m0_prior_sigma=None,
     alpha_update_start=0, c_maxiter=100, verbose_every=10,
     c_smoothness=0.0, c_sparsity=0.0, c_diversity=0.0, nD=None, nT2=None,
-    weight_entropy=0.0, weight_spatial=0.0, voxel_edges=None,
+    weight_entropy=0.0,
     return_diagnostics=False,
 ):
     """Alternating MAP optimization with canonical spectra constrained to simplices."""
@@ -464,16 +438,14 @@ def run_constrained_optimisation(
             if return_diagnostics:
                 W, w_diagnostics = update_W(
                     Y, UC, sigma2, alpha, W, M0, bound_eps,
-                    weight_entropy=weight_entropy, weight_spatial=weight_spatial,
-                    voxel_edges=voxel_edges,
+                    weight_entropy=weight_entropy,
                     return_diagnostics=True,
                 )
                 diagnostics["W"].append(w_diagnostics)
             else:
                 W = update_W(
                     Y, UC, sigma2, alpha, W, M0, bound_eps,
-                    weight_entropy=weight_entropy, weight_spatial=weight_spatial,
-                    voxel_edges=voxel_edges,
+                    weight_entropy=weight_entropy,
                 )
         if update_M0_flag:
             M0 = update_M0(
@@ -504,8 +476,7 @@ def run_constrained_optimisation(
         loss, fit_err = compute_loss(
             Y, UC, W, M0, alpha, lam, C_small, sigma2,
             m0_prior=m0_prior, m0_prior_sigma=m0_prior_sigma,
-            weight_entropy=weight_entropy, weight_spatial=weight_spatial,
-            voxel_edges=voxel_edges,
+            weight_entropy=weight_entropy,
             C=C, c_smoothness=c_smoothness, c_sparsity=c_sparsity,
             c_diversity=c_diversity, nD=nD, nT2=nT2,
         )
